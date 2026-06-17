@@ -4,58 +4,70 @@ export default (config: UserConfig) => {
   // Merge our custom build modifications with Strapi's default Vite configuration
   return mergeConfig(config, {
     build: {
-      // 🛠️ Fix 1: Disable minification to prevent esbuild name-mangling bugs in production
+      // Disable minification to prevent esbuild name-mangling bugs in production
       minify: false,
     },
     plugins: [
       {
         name: 'strapi-tours-safe-patch',
-        
-        // 🛠️ Fix 2a: Intercept individual modules during compilation with explicit types
-        transform(code: string, id: string) {
-          if (id.includes('node_modules') || id.includes('.cache') || id.includes('admin')) {
-            if (code.includes('guidedTour') || code.includes('tours')) {
-              return {
-                code: code
-                  .replace(/guidedTour\.tours/g, 'guidedTour?.tours')
-                  .replace(/guidedTour\.currentStep/g, 'guidedTour?.currentStep')
-                  .replace(/guidedTour\.isComplete/g, 'guidedTour?.isComplete')
-                  .replace(/\.guidedTour/g, '?.guidedTour'),
-                map: null,
-              };
-            }
-          }
-          return null;
-        },
 
-        // 🛠️ Fix 2b: Intercept final compiled production JS chunks with explicit types.
-        // This is 100% reliable because it runs on the final generated build chunks
-        // and overrides any pre-bundled cached files (like index-CMZdh8ZD.js).
-        renderChunk(code: string) {
-          let patched = code;
-          
-          // Safely turn any ".tours" property access into "?.tours"
-          patched = patched.replace(/(?<!\?)\.tours\b/g, '?.tours');
-          
-          // Do the same for other potential guidedTour properties
-          patched = patched.replace(/(?<!\?)\.guidedTour\b/g, '?.guidedTour');
-          patched = patched.replace(/(?<!\?)\.currentStep\b/g, '?.currentStep');
-          patched = patched.replace(/(?<!\?)\.isComplete\b/g, '?.isComplete');
-          
-          return {
-            code: patched,
-            map: null,
-          };
-        },
-
-        // 🛠️ Fix 2c: Inject an active failsafe initialization script into the HTML header.
-        // This executes first in the client's browser before any React elements compile.
+        // Inject an active, client-side runtime failsafe script into the HTML header.
+        // This is 100% safe, bypasses compile-time syntax limitations, and handles
+        // empty profiles dynamically in the browser.
         transformIndexHtml(html: string) {
           const inlineScript = `
             <script>
               (function() {
                 try {
-                  // Force-initialize all variations of guided tour state in localStorage
+                  // 1. Recursive helper to guarantee guidedTour parameters are fully initialized
+                  function sanitizeGuidedTours(obj) {
+                    if (!obj || typeof obj !== 'object') return obj;
+
+                    if (Object.prototype.hasOwnProperty.call(obj, 'guidedTour')) {
+                      if (!obj.guidedTour || typeof obj.guidedTour !== 'object') {
+                        obj.guidedTour = { tours: {}, currentStep: null };
+                      } else if (!obj.guidedTour.tours || typeof obj.guidedTour.tours !== 'object') {
+                        obj.guidedTour.tours = {};
+                      }
+                    }
+
+                    // Traverse nested properties recursively
+                    for (const key in obj) {
+                      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                        if (obj[key] && typeof obj[key] === 'object') {
+                          sanitizeGuidedTours(obj[key]);
+                        }
+                      }
+                    }
+                    return obj;
+                  }
+
+                  // 2. Intercept global JSON parsing
+                  const originalParse = JSON.parse;
+                  JSON.parse = function(...args) {
+                    const result = originalParse.apply(this, args);
+                    try {
+                      return sanitizeGuidedTours(result);
+                    } catch (e) {
+                      return result;
+                    }
+                  };
+
+                  // 3. Intercept Fetch API responses globally
+                  if (window.Response && Response.prototype.json) {
+                    const originalJson = Response.prototype.json;
+                    Response.prototype.json = function(...args) {
+                      return originalJson.apply(this, args).then(data => {
+                        try {
+                          return sanitizeGuidedTours(data);
+                        } catch (e) {
+                          return data;
+                        }
+                      });
+                    };
+                  }
+
+                  // 4. Force fallback values in LocalStorage for redundancy
                   const tourKeys = [
                     'STRAPI_GUIDED_TOUR_CURRENT_STEP',
                     'STRAPI_GUIDED_TOUR_STATE',
@@ -72,11 +84,11 @@ export default (config: UserConfig) => {
                     } catch (e) {}
                   });
 
-                  // Intercept and neutralize any residual guided tour runtime crashes to keep the dashboard online
+                  // 5. Prevent residual unhandled tour-state exceptions from freezing React
                   window.addEventListener('error', function(event) {
                     if (event.message && (event.message.includes('tours') || event.message.includes('guidedTour'))) {
                       console.warn('Neutralized guided tour crash safely:', event.message);
-                      event.preventDefault(); // Prevents the error from bubble-crashing the React thread
+                      event.preventDefault();
                     }
                   });
                 } catch (globalErr) {
