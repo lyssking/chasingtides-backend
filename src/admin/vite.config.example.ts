@@ -1,12 +1,11 @@
-import { mergeConfig, type UserConfig } from 'vite';
+import { mergeConfig } from 'vite';
 
-export default (config: UserConfig) => {
-  // Important: always return the modified config
+export default (config) => {
+  // Merge our custom build modifications with Strapi's default Vite configuration
   return mergeConfig(config, {
-    resolve: {
-      alias: {
-        '@': '/src',
-      },
+    build: {
+      // 🛠️ Fix: Disable minification to prevent esbuild name-mangling bugs in production
+      minify: false,
     },
   });
 };
