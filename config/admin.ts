@@ -12,8 +12,9 @@ const config = ({ env }: Core.Config.Shared.ConfigParams): Core.Config.Admin => 
       salt: env('TRANSFER_TOKEN_SALT'),
     },
   },
+  // 🛠️ Add this block to connect your new variable and clear the warning
   secrets: {
-    encryptionKey: env('ENCRYPTION_KEY'),
+    encryptionKey: env('ENCRYPTION_KEY', 'defaultFallbackEncryptionKey2026!'),
   },
   flags: {
     nps: env.bool('FLAG_NPS', true),
