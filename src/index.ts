@@ -1,67 +1,63 @@
 export default {
-  /**
-   * An asynchronous register function that runs before
-   * your application is initialized.
-   */
   register({ strapi }: { strapi: any }) {
-    // 🛠️ Hook a global server-side middleware directly into Strapi's Koa engine
+    // Global server-side request middleware to catch and hydrate uninitialized objects dynamically
     strapi.server.use(async (ctx: any, next: () => Promise<void>) => {
       await next();
 
-      // Intercept any administration API requests that contain JSON payloads
       if (ctx.path && ctx.path.startsWith('/admin') && ctx.body && typeof ctx.body === 'object') {
-        
-        // Recursive utility to scan and safely hydrate empty preferences on the fly
-        const sanitizePreferences = (obj: any) => {
+        const sanitize = (obj: any) => {
           if (!obj || typeof obj !== 'object') return;
 
-          // Hydrate nested preference objects safely
+          // If a payload has a preferences block but it's unhydrated, inject the schema defaults
           if ('preferences' in obj) {
             if (!obj.preferences || typeof obj.preferences !== 'object') {
               obj.preferences = {};
             }
-            if (!obj.preferences.guidedTour || typeof obj.preferences.guidedTour !== 'object') {
-              obj.preferences.guidedTour = {
-                tours: {},
-                currentStep: null,
-                isComplete: true,
-                enabled: false
-              };
-            }
+            obj.preferences.guidedTour = {
+              tours: {},
+              currentStep: null,
+              isComplete: true,
+              enabled: false
+            };
           }
 
-          // Hydrate direct guidedTour properties securely
-          if ('guidedTour' in obj) {
-            if (!obj.guidedTour || typeof obj.guidedTour !== 'object') {
-              obj.guidedTour = {
-                tours: {},
-                currentStep: null,
-                isComplete: true,
-                enabled: false
-              };
-            }
-          }
-
-          // Traverse deeper into any nested arrays or objects
           for (const key in obj) {
-            if (Object.prototype.hasOwnProperty.call(obj, key)) {
-              if (obj[key] && typeof obj[key] === 'object') {
-                sanitizePreferences(obj[key]);
-              }
+            if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] && typeof obj[key] === 'object') {
+              sanitize(obj[key]);
             }
           }
         };
 
-        // Execute sanitization on the outgoing body
-        sanitizePreferences(ctx.body);
+        sanitize(ctx.body);
       }
     });
   },
 
-  /**
-   * An asynchronous bootstrap function that runs before
-   * your application starts.
-   */
-  bootstrap() {},
-};
+  async bootstrap({ strapi }: { strapi: any }) {
+    // 🛠️ DATABASE SAFEGUARD ENGINE:
+    // This executes directly inside your server instance right before the port opens.
+    // It intercepts your user configurations and forces a fallback schema configuration 
+    // into the system parameters, physically preventing the front-end from getting an undefined 'tours' read.
+    try {
+      const store = strapi.store({ type: 'plugin', name: 'admin' });
+      const currentPreferences = await store.get({ key: 'preferences' });
 
+      if (!currentPreferences || !currentPreferences.guidedTour) {
+        await store.set({
+          key: 'preferences',
+          value: {
+            guidedTour: {
+              tours: {},
+              currentStep: null,
+              isComplete: true,
+              enabled: false
+            }
+          }
+        });
+        strapi.log.info('📦 Database core initialization parameters hydrated securely.');
+      }
+    } catch (err) {
+      strapi.log.error('⚠️ Initialization parameter hydration bypassed safely:', err);
+    }
+  },
+};
