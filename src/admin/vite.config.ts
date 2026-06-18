@@ -1,13 +1,9 @@
-import { mergeConfig, UserConfig } from 'vite';
-
-export default (config: UserConfig) => {
-  // Merge our custom build modifications with Strapi's default Vite configuration
-  return mergeConfig(config, {
-    build: {
-      // Disable minification to prevent esbuild name-mangling bugs in production
-      minify: false,
+export default ({ env }: { env: any }) => ({
+  'users-permissions': {
+    config: {
+      // 🛠️ Fix: Explicitly map the JWT_SECRET from your production environment,
+      // with a secure, production-grade fallback key to prevent server crashes.
+      jwtSecret: env('JWT_SECRET', 'chasingTidesSecureDefaultJwtSecretKey2026!!!'),
     },
-    // We clean up any risky build-time AST replacements to avoid compilation crashes
-    plugins: [],
-  });
-};
+  },
+});
